@@ -1,0 +1,157 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: netbox
+
+x-env:
+  - &DB_NAME
+    name: DB_NAME
+    value: netbox
+  - &DB_USER
+    name: DB_USER
+    value: netbox
+  - &DB_PASSWORD
+    name: DB_PASSWORD
+    value: SOMEPASSWORD
+  - &REDIS_PASSWORD
+    name: REDIS_PASSWORD
+    value: SOMEPASSWORD
+  - &REDIS_CACHE_PASSWORD
+    name: REDIS_PASSWORD
+    value: SOMEPASSWORD
+
+spec:
+  containers:
+    - &app
+      name: app
+      image: netboxcommunity/netbox:v3.4.2
+      env:
+        - name: CORS_ORIGIN_ALLOW_ALL
+          value: 'True'
+        - name: DB_HOST
+          value: localhost
+        - *DB_NAME
+        - *DB_PASSWORD
+        - *DB_USER
+        - name: GRAPHQL_ENABLED
+          value: true
+        - name: HOUSEKEEPING_INTERVAL
+          value: 86400
+        - name: MEDIA_ROOT
+          value: /opt/netbox/netbox/media
+        - name: METRICS_ENABLED
+          value: false
+        - name: REDIS_CACHE_DATABASE
+          value: '1'
+        - name: REDIS_CACHE_HOST
+          value: localhost
+        - name: REDIS_CACHE_PORT
+          value: 6380
+        - name: REDIS_CACHE_INSECURE_SKIP_TLS_VERIFY
+          value: false
+        - <<: *REDIS_CACHE_PASSWORD
+          name: REDIS_CACHE_PASSWORD
+        - name: REDIS_CACHE_SSL
+          value: false
+        - name: REDIS_DATABASE
+          value: '0'
+        - name: REDIS_HOST
+          value: localhost
+        - name: REDIS_INSECURE_SKIP_TLS_VERIFY
+          value: false
+        - *REDIS_PASSWORD
+        - name: REDIS_SSL
+          value: 'false'
+        - name: SECRET_KEY
+          value: 'INSERTSECRETKEY'
+        - name: SKIP_SUPERUSER
+          value: false
+        - name: SUPERUSER_API_TOKEN
+          value: 0123456789abcdef0123456789abcdef01234567
+        - name: SUPERUSER_EMAIL
+          value: admin@example.com
+        - name: SUPERUSER_NAME
+          value: admin
+        - name: SUPERUSER_PASSWORD
+          value: admin
+        - name: WEBHOOKS_ENABLED
+          value: 'true'
+      volumeMounts:
+        - name: media-files
+          mountPath: /opt/netbox/netbox/media
+        - name: reports
+          mountPath: /etc/netbox/repo
+        - name: scripts
+          mountPath: /etc/netbox/scripts
+        - name: config
+          mountPath: /etc/netbox/config
+      ports:
+        - containerPort: 8080
+          hostPort: 8080
+          protocol: TCP
+
+    - <<: *app
+      name: worker
+      command: [ '/opt/netbox/venv/bin/python', '/opt/netbox/netbox/manage.py', 'rqworker' ]
+
+    - <<: *app
+      name: housekeeping
+      command: [ '/opt/netbox/housekeeping.sh' ]
+
+    - name: db
+      image: postgres:15-alpine
+      env:
+        - <<: *DB_NAME
+          name: POSTGRES_DB
+        - <<: *DB_USER
+          name: POSTGRES_USER
+        - <<: *DB_PASSWORD
+          name: POSTGRES_PASSWORD
+      volumeMounts:
+        - name: db
+          mountPath: /var/lib/postgresql/data
+
+    - name: redis
+      image: redis:7-alpine
+      command: [ 'sh', '-c', 'exec redis-server --appendonly yes --requirepass "$REDIS_PASSWORD"' ]
+      env:
+        - *REDIS_PASSWORD
+      volumeMounts:
+        - name: redis
+          mountPath: /data
+
+    - name: redis-cache
+      image: redis:7-alpine
+      command: [ 'sh', '-c', 'exec redis-server --port 6380 --appendonly yes --requirepass "$REDIS_PASSWORD"' ]
+      env:
+        - *REDIS_CACHE_PASSWORD
+      volumes:
+        - name: redis-cache
+          mountPath: /data
+
+
+  volumes:
+    - name: media-files
+      persistentVolumeClaim:
+        claimName: netbox-media-files
+    - name: config
+      persistentVolumeClaim:
+        claimName: netbox-config
+    - name: reports 
+      persistentVolumeClaim:
+        claimName: netbox-reports
+    - name:  scripts
+      persistentVolumeClaim:
+        claimName: netbox-scripts
+    - name:  config
+      persistentVolumeClaim:
+        claimName: netbox-config
+    - name: db
+      persistentVolumeClaim:
+        claimName: netbox-db
+    - name: redis
+      persistentVolumeClaim:
+        claimName: netbox-redis
+    - name: redis-cache
+      persistentVolumeClaim:
+        claimName: netbox-redis-cache
